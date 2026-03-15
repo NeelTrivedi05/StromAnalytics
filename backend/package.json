@@ -1,0 +1,15 @@
+{
+    "name": "stromanalytics-backend",
+    "version": "2.0.0",
+    "description": "StromAnalytics backend — Yahoo Finance proxy + static file server",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node --watch server.js"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^4.18.2",
+        "yahoo-finance2": "^2.11.3"
+    }
+}
