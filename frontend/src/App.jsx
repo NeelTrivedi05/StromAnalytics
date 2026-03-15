@@ -42,6 +42,14 @@ export default function App() {
           </div>
         </div>
         <div className="tb-right">
+          <button className="tb-btn tb-btn--ai" id="aiNarratorBtn">
+            <svg viewBox="0 0 16 16" fill="none" width="13" height="13">
+              <circle cx="8" cy="5" r="3" stroke="currentColor" strokeWidth="1.4"/>
+              <path d="M2 14c0-3.314 2.686-5 6-5s6 1.686 6 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              <path d="M11 3l1 1M5 3l-1 1M8 1v1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+            AI Narrator
+          </button>
           <button className="tb-btn" id="windowsMenuBtn">
             <svg viewBox="0 0 16 16" fill="none" width="13" height="13">
               <rect x="1" y="1" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
@@ -129,7 +137,7 @@ export default function App() {
           <div className="win-resize-handle" data-win="win-sentimental"></div>
         </div>
 
-        {/* Window: Volatility Signal (VIX) */}
+        {/* Window: Primary Chart */}
         <div className="window" id="win-vix" data-window="vix">
           <div className="window-chrome">
             <div className="traffic-lights">
@@ -137,16 +145,33 @@ export default function App() {
               <button className="tl tl-min" data-action="minimize"></button>
               <button className="tl tl-max" data-action="maximize"></button>
             </div>
-            <span className="window-title">VOLATILITY SIGNAL</span>
+            <span className="window-title">PRIMARY CHART — <span id="primaryChartSym">AAPL</span></span>
             <div className="window-meta">
-              <span className="wm-val" id="vixLive">--.-</span>
+              <div className="period-tabs" id="primaryPeriodTabs">
+                <button className="period-tab active" data-period="1D">1D</button>
+                <button className="period-tab" data-period="1W">1W</button>
+                <button className="period-tab" data-period="1M">1M</button>
+                <button className="period-tab" data-period="1Y">1Y</button>
+              </div>
               <span className="live-dot"></span>
             </div>
           </div>
-          <div className="window-body">
-            <canvas id="chartVix"></canvas>
-            <div className="chart-tooltip" id="tooltipVix"></div>
-            <div className="chart-crosshair" id="crosshairVix"></div>
+          <div className="window-body" style={{position:'relative',padding:0}}>
+            <div style={{flex:1,minHeight:0,position:'relative'}}>
+              <div id="primaryChartContainer" className="primary-chart-container"></div>
+            </div>
+            <div className="primary-stats-bar" id="primaryStatsBar">
+              <div className="pstat"><span className="pstat-lbl">PRICE</span><span className="pstat-val" id="primaryPrice">--</span></div>
+              <div className="pstat"><span className="pstat-lbl">CHANGE</span><span className="pstat-val pos" id="primaryChange">--</span></div>
+              <div className="pstat"><span className="pstat-lbl">HIGH</span><span className="pstat-val" id="primaryHigh">--</span></div>
+              <div className="pstat"><span className="pstat-lbl">LOW</span><span className="pstat-val neg" id="primaryLow">--</span></div>
+              <div className="primary-sma-badge" id="primarySmaBadge"></div>
+            </div>
+            <div className="primary-zscore-row">
+              <span className="pz-label">Z-SCORE</span>
+              <span className="pz-val" id="primaryZscoreVal">--</span>
+              <div className="pz-track"><div className="pz-fill" id="primaryZscoreFill"></div></div>
+            </div>
           </div>
           <div className="ghost-msg" id="ghost-vix"></div>
           <div className="win-resize-handle" data-win="win-vix"></div>
@@ -161,17 +186,49 @@ export default function App() {
               <button className="tl tl-max" data-action="maximize"></button>
             </div>
             <span className="window-title">INSTRUMENTAL SIGNAL</span>
-            <div className="window-meta"><span className="live-dot"></span></div>
+            <div className="window-meta">
+              <div className="instr-tabs">
+                <button className="instr-tab active" id="instrTabSignal">Signal</button>
+                <button className="instr-tab" id="instrTabStocks">Stocks</button>
+                <button className="instr-tab" id="instrTabIndices">Indices</button>
+              </div>
+              <span className="live-dot"></span>
+            </div>
           </div>
           <div className="window-body window-body--flush">
-            <div className="instr-body">
-              <div className="instr-header">
-                <div className="instr-nifty-label">NIFTY 50</div>
-                <div className="instr-nifty-price" id="instrNiftyPrice">&#8377;--,---</div>
-                <div className="instr-nifty-delta pos" id="instrNiftyDelta">+0.00%</div>
+            {/* Tab: Signal */}
+            <div className="instr-panel" id="instrPanelSignal">
+              <div className="instr-body">
+                <div className="instr-header">
+                  <div className="instr-nifty-label">NIFTY 50</div>
+                  <div className="instr-nifty-price" id="instrNiftyPrice">&#8377;--,---</div>
+                  <div className="instr-nifty-delta pos" id="instrNiftyDelta">+0.00%</div>
+                </div>
+                <div className="instr-divider"></div>
+                <div className="instr-stocks-list" id="instrStocksList"></div>
               </div>
-              <div className="instr-divider"></div>
-              <div className="instr-stocks-list" id="instrStocksList"></div>
+            </div>
+            {/* Tab: Stocks (Favorites / Top Gainers) */}
+            <div className="instr-panel" id="instrPanelStocks" style={{display:'none'}}>
+              <div className="instr-body">
+                <div className="instr-header">
+                  <div className="instr-nifty-label">TOP PERFORMERS</div>
+                  <div className="instr-nifty-delta pos" id="instrStocksUpdated">Live</div>
+                </div>
+                <div className="instr-divider"></div>
+                <div className="instr-stocks-list" id="instrFavList"></div>
+              </div>
+            </div>
+            {/* Tab: Indices */}
+            <div className="instr-panel" id="instrPanelIndices" style={{display:'none'}}>
+              <div className="instr-body">
+                <div className="instr-header">
+                  <div className="instr-nifty-label">INDICES</div>
+                  <div className="instr-nifty-delta" id="instrIndicesUpdated">Click index to load chart</div>
+                </div>
+                <div className="instr-divider"></div>
+                <div className="instr-stocks-list" id="instrIndicesList"></div>
+              </div>
             </div>
           </div>
           <div className="win-resize-handle" data-win="win-instrumental"></div>
@@ -189,8 +246,11 @@ export default function App() {
             <div className="window-meta"><span className="live-dot"></span></div>
           </div>
           <div className="window-body window-body--index">
-            <div className="index-sym" id="indexSym">---</div>
-            <div className="index-name" id="indexName">---</div>
+            <div className="index-head">
+              <div className="index-kicker">INSTRUMENT</div>
+              <div className="index-sym" id="indexSym">---</div>
+              <div className="index-name" id="indexName">---</div>
+            </div>
             <div className="index-price" id="indexPrice">&#8377;--,---</div>
             <div className="index-delta" id="indexDelta">+0.00%</div>
             <div className="index-change" id="indexChange">+&#8377;0.00</div>
@@ -250,7 +310,7 @@ export default function App() {
           <div className="win-resize-handle" data-win="win-signallog"></div>
         </div>
 
-        {/* Window: Anomaly Log */}
+        {/* Window: Anomaly Log — Whisper Feed */}
         <div className="window" id="win-anomalylog" data-window="anomalylog">
           <div className="window-chrome">
             <div className="traffic-lights">
@@ -260,12 +320,12 @@ export default function App() {
             </div>
             <span className="window-title">ANOMALY LOG</span>
             <div className="window-meta">
-              <span className="wm-count" id="anomCount">0</span>
+              <span className="wm-badge wm-badge--red" id="anomalyAlertsCount">ALERTS: 0</span>
               <span className="live-dot"></span>
             </div>
           </div>
           <div className="window-body window-body--flush">
-            <div className="signal-log" id="anomalyLog">
+            <div className="whisper-feed" id="anomalyLog">
               <div className="fp-empty">No anomalies detected…</div>
             </div>
           </div>
@@ -298,7 +358,14 @@ export default function App() {
         <div className="stock-modal" id="stockModal">
           <div className="stock-modal-header">
             <div className="stock-modal-title-group">
-              <span className="stock-modal-sym" id="modalSym">---</span>
+              <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                <button className="stock-modal-back" id="stockModalBack">
+                  <svg viewBox="0 0 14 14" fill="none" width="12" height="12">
+                    <path d="M9 1L3 7l6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+                <span className="stock-modal-sym" id="modalSym">---</span>
+              </div>
               <span className="stock-modal-name" id="modalName">---</span>
             </div>
             <div className="stock-modal-actions">
@@ -315,10 +382,21 @@ export default function App() {
             <span className="stock-modal-delta" id="modalDelta">---%</span>
             <span className="stock-modal-change" id="modalChange">---</span>
           </div>
+          <div className="stock-modal-period-row">
+            <button className="smp-tab active" data-speriod="1D">1D</button>
+            <button className="smp-tab" data-speriod="1W">1W</button>
+            <button className="smp-tab" data-speriod="1M">1M</button>
+            <button className="smp-tab" data-speriod="1Y">1Y</button>
+          </div>
+          <div className="stock-modal-chart-wrap">
+            <canvas id="modalChart"></canvas>
+          </div>
           <div className="stock-modal-stats">
+            <div className="stat-card"><span className="stat-label">Open</span><span className="stat-val" id="modalOpen">---</span></div>
             <div className="stat-card"><span className="stat-label">Day High</span><span className="stat-val" id="modalHigh">---</span></div>
             <div className="stat-card"><span className="stat-label">Day Low</span><span className="stat-val" id="modalLow">---</span></div>
             <div className="stat-card"><span className="stat-label">Volume</span><span className="stat-val" id="modalVolume">---</span></div>
+            <div className="stat-card"><span className="stat-label">Prev Close</span><span className="stat-val" id="modalPrevClose">---</span></div>
             <div className="stat-card"><span className="stat-label">Source</span><span className="stat-val" id="modalSource">---</span></div>
           </div>
           <div className="stock-modal-footer">
@@ -382,6 +460,35 @@ export default function App() {
         <div className="fp-body" id="alertsPanelBody">
           <div className="fp-empty">No alerts yet — monitoring streams…</div>
         </div>
+      </div>
+
+      {/* ── AI Market Narrator Panel ──────────────────────── */}
+      <div className="ai-narrator-panel" id="aiNarratorPanel">
+        <div className="ai-panel-chrome">
+          <div className="ai-panel-title-row">
+            <div className="ai-panel-icon">AI</div>
+            <span className="ai-panel-title">AI Market Narrator</span>
+            <div className="ai-panel-controls">
+              <button className="ai-ctrl-btn" id="aiMinBtn" title="Minimize">—</button>
+              <button className="ai-ctrl-btn" id="aiMaxBtn" title="Maximize">⤢</button>
+              <button className="ai-ctrl-btn ai-ctrl-close" id="aiCloseBtn" title="Close">×</button>
+            </div>
+          </div>
+          <div className="ai-panel-live-row">
+            <span className="live-dot"></span>
+            <span className="ai-live-label">Live narrative · updates every 5s</span>
+          </div>
+        </div>
+        <div className="ai-panel-body" id="aiNarratorBody">
+          <div className="ai-narrative-text" id="aiNarrativeText">
+            Initialising market intelligence…
+          </div>
+          <div className="ai-narrative-stream" id="aiNarrativeStream"></div>
+        </div>
+        <div className="ai-panel-footer">
+          <span className="ai-disclaimer">AI can make mistakes. The predicted news may not be 100% accurate.</span>
+        </div>
+        <div className="ai-resize-handle" id="aiResizeHandle"></div>
       </div>
 
       {/* ── Boot Overlay ───────────────────────────────────── */}

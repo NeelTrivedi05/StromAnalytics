@@ -3,6 +3,7 @@
  */
 import { Chart, registerables } from 'chart.js';
 import { CandlestickController, CandlestickElement, OhlcController, OhlcElement } from 'chartjs-chart-financial';
+import { ColorType, createChart } from 'lightweight-charts';
 Chart.register(...registerables, CandlestickController, CandlestickElement, OhlcController, OhlcElement);
 
 const CFG = { OF_TICK: 1200, VIX_TICK: 2000, SENT_TICK: 3500, HEATMAP_TICK: 2500, LOG_TICK: 3800, API_POLL: 8000, CHART_WIN: 90, SEED: 80, LOG_MAX: 40, ANOMALY_CD: 6000, ALERT_MIN: 15000, ALERT_MAX: 30000, GRID: 20 };
@@ -46,9 +47,51 @@ function fmtNum(v) { if (!v && v !== 0) return '\u2014'; if (v >= 1e7) return (v
 function fmtTime(d = new Date()) { return [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, '0')).join(':'); }
 function fmtDate(d = new Date()) { const D = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'], M = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']; return `${D[d.getDay()]} ${d.getDate()} ${M[d.getMonth()]} ${d.getFullYear()}`; }
 const nowStr = () => fmtTime();
+function getInstrument(sym) { return STOCKS.find(s => s.sym === sym) || INDICES.find(i => i.sym === sym) || null; }
+function getInstrumentBase(sym) { return S.stockPrices[sym]?.price || getInstrument(sym)?.base || 1000; }
+function getInstrumentName(sym) { return getInstrument(sym)?.name || sym; }
+function formatCandleLabel(ts, period) {
+  const d = new Date(ts);
+  if (period === '1D') return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+  if (period === '1W') return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][((d.getDay() + 6) % 7)];
+  if (period === '1Y') return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+  return d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+}
+function computeRollingZScore(values, period = 20) {
+  if (!values.length) return 0;
+  const slice = values.slice(-Math.min(period, values.length));
+  const mean = slice.reduce((sum, value) => sum + value, 0) / slice.length;
+  const variance = slice.reduce((sum, value) => sum + (value - mean) ** 2, 0) / slice.length;
+  const std = Math.sqrt(variance) || 1;
+  return (slice.at(-1) - mean) / std;
+}
 
-const S = { of: 0, ofH: [], ofConsec: { sign: 0, n: 0 }, vix: 28, vixH: [], prevVix: 28, sent: 0.12, sentH: [], stockPrices: {}, apiData: null, lastAnomaly: 0, anomCount: 0, alertCount: 0, topGainerSym: 'TCS', activePeriod: 'D' };
+const S = { of: 0, ofH: [], ofConsec: { sign: 0, n: 0 }, vix: 28, vixH: [], prevVix: 28, sent: 0.12, sentH: [], stockPrices: {}, apiData: null, lastAnomaly: 0, anomCount: 0, alertCount: 0, topGainerSym: 'TCS', activePeriod: '1D', primarySym: 'RELIANCE', primaryPeriod: '1D', modalSym: null, modalPeriod: '1D', instrumentalTab: 'signal' };
+
+/* ── Indices Universe ────────────────────────────────────── */
+const INDICES = [
+  { sym: 'NIFTY50',    base: 22847,  name: 'NIFTY 50',         change: 0.42,  exchange: 'NSE' },
+  { sym: 'SENSEX',     base: 75243,  name: 'BSE SENSEX',        change: 0.38,  exchange: 'BSE' },
+  { sym: 'BANKNIFTY',  base: 48200,  name: 'BANK NIFTY',        change: -0.18, exchange: 'NSE' },
+  { sym: 'NIFTY100',   base: 23400,  name: 'NIFTY 100',         change: 0.31,  exchange: 'NSE' },
+  { sym: 'FINNIFTY',   base: 21800,  name: 'FIN NIFTY',         change: -0.08, exchange: 'NSE' },
+  { sym: 'MIDCAP150',  base: 17300,  name: 'NIFTY MIDCAP 150',  change: 0.65,  exchange: 'NSE' },
+  { sym: 'SMALLCAP',   base: 14200,  name: 'NIFTY SMALLCAP',    change: 0.88,  exchange: 'NSE' },
+  { sym: 'IT',         base: 37500,  name: 'NIFTY IT',          change: 1.20,  exchange: 'NSE' },
+  { sym: 'PHARMA',     base: 19200,  name: 'NIFTY PHARMA',      change: -0.44, exchange: 'NSE' },
+  { sym: 'NIFTYAUTO',  base: 22100,  name: 'NIFTY AUTO',        change: 0.55,  exchange: 'NSE' },
+  { sym: 'NIFTYFMCG', base: 54800,  name: 'NIFTY FMCG',        change: -0.22, exchange: 'NSE' },
+  { sym: 'NIFTYMETAL', base: 8950,   name: 'NIFTY METAL',       change: 1.45,  exchange: 'NSE' },
+  { sym: 'NIFTYREALTY',base: 1020,   name: 'NIFTY REALTY',      change: 0.78,  exchange: 'NSE' },
+  { sym: 'BSE500',     base: 32400,  name: 'BSE 500',           change: 0.29,  exchange: 'BSE' },
+];
 const CHARTS = {};
+const TIMEFRAME_CONFIG = {
+  '1D': { bars: 26, stepMs: 15 * 60 * 1000, drift: 0.0075, wick: 0.003, volumeBase: 1300000 },
+  '1W': { bars: 35, stepMs: 2 * 60 * 60 * 1000, drift: 0.011, wick: 0.005, volumeBase: 2200000 },
+  '1M': { bars: 30, stepMs: 24 * 60 * 60 * 1000, drift: 0.015, wick: 0.008, volumeBase: 4500000 },
+  '1Y': { bars: 52, stepMs: 7 * 24 * 60 * 60 * 1000, drift: 0.028, wick: 0.014, volumeBase: 9000000 },
+};
 
 const genOF = p => clamp((p || 0) * 0.82 + rand(-28, 28), -100, 100);
 const genVIX = p => clamp((p || 28) + rand(-1.8, 1.8), 10, 80);
@@ -64,14 +107,8 @@ function initCharts() {
     CHARTS.of = new Chart(ctx, { type: 'bar', data: { labels: data.map((_, i) => i), datasets: [{ data, backgroundColor: data.map(v => v >= 0 ? cssVar('--c-green') + 'cc' : cssVar('--c-red') + 'cc'), borderWidth: 0, barPercentage: 0.85 }] }, options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { grid: { color: cssVar('--c-s3') + '33', drawBorder: false }, border: { display: false }, ticks: { color: cssVar('--c-l3'), maxTicksLimit: 4 }, suggestedMin: -100, suggestedMax: 100 } } } });
     initCrosshair('chartOrderflow', 'tooltipOrderflow', 'crosshairOrderflow', i => { const v = S.ofH[i] || 0; return { label: 'ORDER FLOW', val: (v >= 0 ? '+' : '') + v.toFixed(1), sub: v >= 0 ? 'Buying Pressure' : 'Selling Pressure', subCls: v >= 0 ? 'pos' : 'neg' }; }, 'of');
   }
-  // VIX
-  {
-    const data = seed(genVIX, CFG.SEED); S.vixH = [...data]; S.vix = data.at(-1); S.prevVix = data.at(-2);
-    const el = $('chartVix'), ctx = el.getContext('2d');
-    const g = ctx.createLinearGradient(0, 0, 0, el.offsetHeight || 200); g.addColorStop(0, cssVar('--c-red') + '33'); g.addColorStop(1, 'transparent');
-    CHARTS.vix = new Chart(ctx, { type: 'line', data: { labels: data.map((_, i) => i), datasets: [{ data, borderColor: cssVar('--c-red'), borderWidth: 1.8, backgroundColor: g, fill: true, tension: 0.3, pointRadius: 0 }] }, options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { position: 'right', border: { display: false }, grid: { color: cssVar('--c-s3') + '55' }, ticks: { color: cssVar('--c-l3'), maxTicksLimit: 4, font: { size: 10 } } } } } });
-    initCrosshair('chartVix', 'tooltipVix', 'crosshairVix', i => { const v = S.vixH[i] || 0; const risk = v > 30 ? 'HIGH RISK' : v > 20 ? 'MODERATE' : 'LOW RISK'; return { label: 'INDIA VIX', val: v.toFixed(2), sub: risk, subCls: v > 30 ? 'neg' : v > 20 ? '' : 'pos' }; }, 'vix');
-  }
+  // Primary Chart (replaces VIX)
+  initPrimaryChart();
   // Live Candlestick
   initLiveChart();
 }
@@ -97,29 +134,27 @@ function initCrosshair(canvasId, tipId, crossId, dataFn, type) {
 }
 
 /* ── Candlestick Chart ───────────────────────────────────── */
-function genOHLC(base, days) {
-  const data = []; const MS_DAY = 86400000; const now = Date.now();
+function genOHLC(base, period = '1D') {
+  const cfg = TIMEFRAME_CONFIG[period] || TIMEFRAME_CONFIG['1D'];
+  const data = [];
+  const start = Date.now() - (cfg.bars - 1) * cfg.stepMs;
   let price = base;
-  for (let i = days; i >= 0; i--) {
-    const t = now - i * MS_DAY;
+  for (let i = 0; i < cfg.bars; i++) {
+    const t = start + i * cfg.stepMs;
     const open = price;
-    const change = rand(-0.025, 0.025);
-    const close = Math.max(base * 0.5, open * (1 + change));
-    const high = Math.max(open, close) * (1 + rand(0, 0.01));
-    const low = Math.min(open, close) * (1 - rand(0, 0.01));
-    data.push({ x: t, o: +open.toFixed(2), h: +high.toFixed(2), l: +low.toFixed(2), c: +close.toFixed(2) });
+    const change = rand(-cfg.drift, cfg.drift);
+    const close = Math.max(base * 0.55, open * (1 + change));
+    const high = Math.max(open, close) * (1 + rand(0.0008, cfg.wick));
+    const low = Math.min(open, close) * (1 - rand(0.0008, cfg.wick));
+    const volume = Math.round(cfg.volumeBase * (0.55 + Math.abs(change) * 18 + rand(0, 0.45)));
+    data.push({ x: t, o: +open.toFixed(2), h: +high.toFixed(2), l: +low.toFixed(2), c: +close.toFixed(2), v: volume });
     price = close;
   }
   return data;
 }
 
 function getCandleData(sym, period) {
-  const stock = STOCKS.find(s => s.sym === sym) || STOCKS[0];
-  const base = S.stockPrices[sym]?.price || stock.base;
-  // Support both old codes ('D','W','M') and new HTML codes ('1D','1W','1M','1Y')
-  const p = period ? period.replace(/^1/, '') : 'D';
-  const pts = p === 'Y' ? 12 : p === 'M' ? 30 : p === 'W' ? 14 : 24;
-  return genOHLC(base, pts);
+  return genOHLC(getInstrumentBase(sym), period);
 }
 
 function initLiveChart() {
@@ -129,25 +164,23 @@ function initLiveChart() {
     const ctx = canvas.getContext('2d');
     const sym = S.topGainerSym || 'TCS';
     const raw = getCandleData(sym, S.activePeriod);
-    $('liveChartSym').textContent = sym;
-    // Convert timestamp x to label string so no time adapter needed
-    const labels = raw.map(pt => {
-      const d = new Date(pt.x);
-      const np = S.activePeriod ? S.activePeriod.replace(/^1/, '') : 'D';
-      if (np === 'D') return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
-      if (np === 'W') return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
-      if (np === 'Y') return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
-      return d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
-    });
+    if ($('liveChartSym')) $('liveChartSym').textContent = sym;
+    const labels = raw.map(pt => formatCandleLabel(pt.x, S.activePeriod));
     const candleData = raw.map((pt, i) => ({ x: i, o: pt.o, h: pt.h, l: pt.l, c: pt.c }));
+    const upColor = cssVar('--c-green') || '#30d158';
+    const dnColor = cssVar('--c-red') || '#ff453a';
     CHARTS.live = new Chart(ctx, {
       type: 'candlestick',
-      data: { labels, datasets: [{ data: candleData, color: { up: cssVar('--c-green') || '#30d158', down: cssVar('--c-red') || '#ff453a', unchanged: '#888' }, borderColor: { up: cssVar('--c-green') || '#30d158', down: cssVar('--c-red') || '#ff453a', unchanged: '#888' } }] },
+      data: { labels, datasets: [{ data: candleData,
+        color: { up: upColor, down: dnColor, unchanged: '#888888' },
+        borderColor: { up: upColor, down: dnColor, unchanged: '#888888' },
+        backgroundColors: { up: upColor + '99', down: dnColor + '99', unchanged: '#88888899' },
+      }] },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
         scales: {
-          x: { type: 'category', grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: 'rgba(255,255,255,0.35)', font: { size: 9 }, maxTicksLimit: 8 } },
+          x: { type: 'category', grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: 'rgba(255,255,255,0.35)', font: { size: 9 }, maxTicksLimit: S.activePeriod === '1Y' ? 12 : 8 } },
           y: { position: 'right', grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: 'rgba(255,255,255,0.35)', font: { size: 9 }, callback: v => fmtINR(v), maxTicksLimit: 6 }, border: { display: false } }
         }
       }
@@ -156,6 +189,7 @@ function initLiveChart() {
     CHARTS.live._rawData = raw;
     CHARTS.live._labels = labels;
     initCandleCrosshair();
+    setTimeout(() => { if (CHARTS.live) CHARTS.live.resize(); }, 40);
   } catch (err) { console.warn('Candlestick chart error:', err); }
 }
 
@@ -272,6 +306,170 @@ function initCandleCrosshair() {
   });
 }
 
+/* ── Primary Chart (replaces VIX) ───────────────────────── */
+function destroyPrimaryChart() {
+  if (CHARTS.primaryResizeObserver) {
+    CHARTS.primaryResizeObserver.disconnect();
+    delete CHARTS.primaryResizeObserver;
+  }
+  if (CHARTS.primary) {
+    CHARTS.primary.remove();
+    delete CHARTS.primary;
+  }
+}
+
+function initPrimaryChart() {
+  const container = $('primaryChartContainer'); if (!container) return;
+  try {
+    destroyPrimaryChart();
+    const sym = S.primarySym || 'RELIANCE';
+    const raw = getCandleData(sym, S.primaryPeriod);
+    const closes = raw.map(p => p.c);
+    const first = raw[0], last = raw[raw.length - 1];
+    const hi = Math.max(...raw.map(p => p.h)), lo = Math.min(...raw.map(p => p.l));
+    const pct = first ? ((last.c - first.o) / first.o * 100) : 0;
+    const chart = createChart(container, {
+      autoSize: true,
+      layout: {
+        background: { type: ColorType.Solid, color: '#1a1a1a' },
+        textColor: '#d1d4dc',
+      },
+      grid: {
+        vertLines: { color: 'rgba(255,255,255,0.05)' },
+        horzLines: { color: 'rgba(255,255,255,0.05)' },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(255,255,255,0.08)',
+        scaleMargins: { top: 0.08, bottom: 0.28 },
+      },
+      timeScale: {
+        borderColor: 'rgba(255,255,255,0.08)',
+        timeVisible: S.primaryPeriod === '1D' || S.primaryPeriod === '1W',
+        secondsVisible: false,
+      },
+      crosshair: {
+        vertLine: { color: 'rgba(255,255,255,0.18)', width: 1 },
+        horzLine: { color: 'rgba(255,255,255,0.12)', width: 1 },
+      },
+      localization: {
+        priceFormatter: value => fmtINR(value),
+      },
+    });
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: '#26a69a',
+      downColor: '#ef5350',
+      borderUpColor: '#26a69a',
+      borderDownColor: '#ef5350',
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
+    });
+    const volumeSeries = chart.addHistogramSeries({
+      priceScaleId: 'volume',
+      priceFormat: { type: 'volume' },
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    chart.priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.76, bottom: 0 },
+      visible: false,
+    });
+    const sma20Series = chart.addLineSeries({ color: '#ff9f0a', lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+    const sma50Series = chart.addLineSeries({ color: '#0a84ff', lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+    candleSeries.setData(raw.map(pt => ({ time: Math.floor(pt.x / 1000), open: pt.o, high: pt.h, low: pt.l, close: pt.c })));
+    volumeSeries.setData(raw.map(pt => ({ time: Math.floor(pt.x / 1000), value: pt.v, color: pt.c >= pt.o ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)' })));
+    sma20Series.setData(raw.map((pt, idx) => idx < 19 ? null : ({ time: Math.floor(pt.x / 1000), value: closes.slice(idx - 19, idx + 1).reduce((sum, value) => sum + value, 0) / 20 })).filter(Boolean));
+    sma50Series.setData(raw.map((pt, idx) => idx < 49 ? null : ({ time: Math.floor(pt.x / 1000), value: closes.slice(idx - 49, idx + 1).reduce((sum, value) => sum + value, 0) / 50 })).filter(Boolean));
+    chart.timeScale().fitContent();
+    CHARTS.primary = chart;
+
+    if ($('primaryChartSym')) $('primaryChartSym').textContent = sym;
+    if ($('primaryPrice')) $('primaryPrice').textContent = fmtINR(last.c);
+    const chgEl = $('primaryChange');
+    if (chgEl) {
+      chgEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+      chgEl.className = 'pstat-val ' + (pct >= 0 ? 'pos' : 'neg');
+    }
+    if ($('primaryHigh')) $('primaryHigh').textContent = fmtINR(hi);
+    if ($('primaryLow')) $('primaryLow').textContent = fmtINR(lo);
+    if ($('primarySmaBadge')) $('primarySmaBadge').innerHTML = '<span style="color:#ff9f0a">■ SMA20</span> <span style="color:#0a84ff">■ SMA50</span>';
+
+    const zscore = computeRollingZScore(closes, 20);
+    const zEl = $('primaryZscoreVal');
+    if (zEl) {
+      zEl.textContent = (zscore >= 0 ? '+' : '') + zscore.toFixed(2);
+      zEl.style.color = zscore > 1.5 ? '#30d158' : zscore < -1.5 ? '#ff453a' : '#ff9f0a';
+    }
+    const zFill = $('primaryZscoreFill');
+    if (zFill) {
+      const clampedZ = Math.max(-3, Math.min(3, zscore));
+      const width = Math.abs(clampedZ) / 3 * 50;
+      zFill.style.left = clampedZ >= 0 ? '50%' : (50 - width) + '%';
+      zFill.style.width = width + '%';
+      zFill.style.background = clampedZ >= 0 ? '#30d158' : '#ff453a';
+    }
+
+    if (window.ResizeObserver) {
+      CHARTS.primaryResizeObserver = new ResizeObserver(entries => {
+        const entry = entries[0];
+        if (!entry) return;
+        chart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) });
+      });
+      CHARTS.primaryResizeObserver.observe(container);
+    }
+  } catch(err) { console.warn('Primary chart error:', err); }
+}
+
+function initPrimaryCrosshair(raw, labels) {
+  const canvas = $('chartPrimary'), tip = $('primaryTooltip'), cross = $('primaryCrosshair');
+  if (!canvas || !tip || !cross) return;
+  let hlCanvas = $('primaryHlCanvas');
+  if (!hlCanvas) { hlCanvas = document.createElement('canvas'); hlCanvas.id = 'primaryHlCanvas'; hlCanvas.style.cssText='position:absolute;top:0;left:0;pointer-events:none;z-index:10;'; canvas.parentElement.appendChild(hlCanvas); }
+
+  canvas.onmousemove = null; canvas.onmouseleave = null;
+  canvas.addEventListener('mousemove', function(e) {
+    const ch = CHARTS.primary; if (!ch) return;
+    const rect = canvas.getBoundingClientRect();
+    const mX = e.clientX - rect.left;
+    const ds = ch.data.datasets[0]?.data;
+    if (!ds?.length || !raw) return;
+    const cssW = Math.round(rect.width), cssH = Math.round(rect.height);
+    if (hlCanvas.width !== cssW) hlCanvas.width = cssW;
+    if (hlCanvas.height !== cssH) hlCanvas.height = cssH;
+    const xScale = ch.scales.x, yScale = ch.scales.y;
+    const dpr = ch.currentDevicePixelRatio || window.devicePixelRatio || 1;
+    let best=-1,bestDist=Infinity;
+    for (let j=0;j<ds.length;j++) { try { const xC = xScale.getPixelForValue(ds[j].x)/dpr; const d=Math.abs(xC-mX); if(d<bestDist){bestDist=d;best=j;} } catch(_){} }
+    const hCtx = hlCanvas.getContext('2d');
+    hCtx.clearRect(0,0,hlCanvas.width,hlCanvas.height);
+    if (best<0||bestDist>44) { tip.classList.remove('visible'); cross.classList.remove('visible'); return; }
+    const pt = raw[best]; const lbl = labels?labels[best]:'\u2014'; const isUp = pt.c>=pt.o;
+    const color = isUp?'#30d158':'#ff453a';
+    const xCss=xScale.getPixelForValue(ds[best].x)/dpr;
+    const yHCss=yScale.getPixelForValue(pt.h)/dpr, yLCss=yScale.getPixelForValue(pt.l)/dpr;
+    const yOCss=yScale.getPixelForValue(pt.o)/dpr, yCCss=yScale.getPixelForValue(pt.c)/dpr;
+    const bodyTop=Math.min(yOCss,yCCss), bodyBot=Math.max(yOCss,yCCss), bodyH=Math.max(bodyBot-bodyTop,2);
+    const halfW=Math.max(3,Math.min(14,(xScale.width/dpr/ds.length)*0.40));
+    hCtx.beginPath(); hCtx.strokeStyle=color; hCtx.lineWidth=1.5;
+    hCtx.moveTo(xCss,yHCss); hCtx.lineTo(xCss,yLCss); hCtx.stroke();
+    hCtx.fillStyle=isUp?'rgba(48,209,88,0.28)':'rgba(255,69,58,0.28)';
+    hCtx.fillRect(xCss-halfW,bodyTop,halfW*2,bodyH);
+    hCtx.strokeStyle=color; hCtx.lineWidth=1.5;
+    hCtx.strokeRect(xCss-halfW,bodyTop,halfW*2,bodyH);
+    const pct=pt.o?((pt.c-pt.o)/pt.o*100):0;
+    tip.innerHTML='<div class="ct-ohlc-date">'+lbl+' <span class="ct-ohlc-val '+(isUp?'up':'dn')+'">'+(pct>=0?'+':'')+pct.toFixed(2)+'%</span></div>'
+      +'<div class="ct-ohlc-grid">'
+      +'<span class="ct-ohlc-lbl">Open</span><span class="ct-ohlc-val">'+fmtINR(pt.o)+'</span>'
+      +'<span class="ct-ohlc-lbl">High</span><span class="ct-ohlc-val">'+fmtINR(pt.h)+'</span>'
+      +'<span class="ct-ohlc-lbl">Low</span><span class="ct-ohlc-val">'+fmtINR(pt.l)+'</span>'
+      +'<span class="ct-ohlc-lbl">Close</span><span class="ct-ohlc-val '+(isUp?'up':'dn')+'">'+fmtINR(pt.c)+'</span></div>';
+    let tx=xCss+halfW+12; if(tx+180>rect.width) tx=xCss-halfW-192; tx=Math.max(4,tx);
+    const ty=Math.max(6,Math.min(e.clientY-rect.top-60,rect.height-145));
+    tip.style.left=tx+'px'; tip.style.top=ty+'px'; tip.classList.add('visible');
+    cross.style.left=xCss+'px'; cross.classList.add('visible');
+  });
+  canvas.addEventListener('mouseleave', () => { tip.classList.remove('visible'); cross.classList.remove('visible'); const hCtx = ($('primaryHlCanvas')||{}).getContext?.('2d'); hCtx?.clearRect(0,0,9999,9999); });
+}
+
 /* ── WindowManager ───────────────────────────────────────── */
 class WindowManager {
   constructor() { this.wins = new Map(); this.topZ = 100; this.focused = null; }
@@ -284,11 +482,39 @@ class WindowManager {
     el.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); const a = btn.dataset.action; if (a === 'close') this.close(id); if (a === 'minimize') this.minimize(id); if (a === 'maximize') this.maximize(id); }));
   }
   focus(id) { if (this.focused === id) return; this.focused = id; this.topZ++; this.wins.forEach((w, wid) => { w.z = wid === id ? this.topZ : w.z; w.el.style.zIndex = w.z; w.el.classList.toggle('window--focused', wid === id); }); updateWindowsMenuUI(); }
-  minimize(id) { const w = this.wins.get(id); if (!w) return; if (w.state === 'minimized') { this.restore(id); return; } this._saveRect(w); w.state = 'minimized'; w.el.classList.add('window--minimized'); w.el.classList.remove('window--maximized'); updateWindowsMenuUI(); }
-  maximize(id) { const w = this.wins.get(id); if (!w) return; if (w.state === 'maximized') { this.restore(id); return; } this._saveRect(w); w.state = 'maximized'; w.el.classList.add('window--maximized'); w.el.classList.remove('window--minimized'); this.focus(id); setTimeout(() => resizeAllCharts(), 320); updateWindowsMenuUI(); }
-  restore(id) { const w = this.wins.get(id); if (!w) return; w.state = 'normal'; w.el.classList.remove('window--minimized', 'window--maximized'); w.el.style.cssText = `left:${w.savedRect.l}px;top:${w.savedRect.t}px;width:${w.savedRect.w}px;height:${w.savedRect.h}px;z-index:${w.z};`; setTimeout(() => resizeAllCharts(), 320); updateWindowsMenuUI(); }
+  minimize(id) {
+    const w = this.wins.get(id); if (!w) return;
+    if (w.state === 'minimized') { this.restore(id); return; }
+    if (w.state !== 'maximized') this._saveRect(w); // only save rect when not already maximized
+    w.state = 'minimized';
+    // Collapse to chrome height only — preserve left/top/width so restore snaps back correctly
+    w.el.style.height = 'var(--chrome-h)';
+    w.el.style.overflow = 'hidden';
+    w.el.classList.add('window--minimized');
+    w.el.classList.remove('window--maximized');
+    updateWindowsMenuUI();
+  }
+  maximize(id) {
+    const w = this.wins.get(id); if (!w) return;
+    if (w.state === 'maximized') { this.restore(id); return; }
+    this._saveRect(w); w.state = 'maximized';
+    w.el.classList.add('window--maximized');
+    w.el.classList.remove('window--minimized');
+    w.el.style.height = '';
+    w.el.style.overflow = '';
+    this.focus(id); setTimeout(() => resizeAllCharts(), 320); updateWindowsMenuUI();
+  }
+  restore(id) {
+    const w = this.wins.get(id); if (!w) return;
+    w.state = 'normal';
+    w.el.classList.remove('window--minimized', 'window--maximized');
+    // Restore to the exact position/size from before minimize/maximize was called
+    w.el.style.cssText = `left:${w.savedRect.l}px;top:${w.savedRect.t}px;width:${w.savedRect.w}px;height:${w.savedRect.h}px;z-index:${w.z};overflow:hidden;`;
+    this.focus(id);
+    setTimeout(() => resizeAllCharts(), 100); updateWindowsMenuUI();
+  }
   close(id) { const w = this.wins.get(id); if (!w) return; w.state = 'closed'; w.el.classList.add('window--closing'); setTimeout(() => { w.el.style.display = 'none'; w.el.classList.remove('window--closing'); }, 260); updateWindowsMenuUI(); }
-  open(id) { const w = this.wins.get(id); if (!w) return; w.el.style.display = ''; w.state = 'normal'; w.el.classList.add('window--opening'); setTimeout(() => w.el.classList.remove('window--opening'), 320); this.focus(id); resizeAllCharts(); updateWindowsMenuUI(); }
+  open(id) { const w = this.wins.get(id); if (!w) return; w.el.style.display = ''; w.state = 'normal'; w.el.style.height = w.savedRect.h + 'px'; w.el.style.overflow = 'hidden'; w.el.classList.add('window--opening'); setTimeout(() => w.el.classList.remove('window--opening'), 320); this.focus(id); resizeAllCharts(); updateWindowsMenuUI(); }
   _saveRect(w) { const r = w.el.getBoundingClientRect(); const desk = document.getElementById('desktop').getBoundingClientRect(); w.savedRect = { l: r.left - desk.left, t: r.top - desk.top, w: r.width, h: r.height }; }
   pulseWin(id, sev = 'warn') { const w = this.wins.get(id); if (!w) return; const cls = sev === 'crit' ? 'window--pulse-red' : 'window--pulse-amber'; w.el.classList.remove('window--pulse-red', 'window--pulse-amber'); void w.el.offsetWidth; w.el.classList.add(cls); setTimeout(() => w.el.classList.remove(cls), 3100); }
 }
@@ -354,7 +580,7 @@ function onResizeEnd() { if (!rsz) return; rsz.ovl.removeEventListener('mousemov
 function resizeAllCharts() { Object.values(CHARTS).forEach(c => c && c.resize && c.resize()); }
 
 /* ── Windows Menu ───────────────────────────────────────── */
-const WIN_LABELS = { orderflow: 'Order Flow Delta', sentimental: 'Sentimental Signal', vix: 'Volatility Signal', instrumental: 'Instrumental Signal', index: 'Index', livechart: 'Live Chart', signallog: 'Signal Log', anomalylog: 'Anomaly Log', heatmap: 'Heat Map' };
+const WIN_LABELS = { orderflow: 'Order Flow Delta', sentimental: 'Sentimental Signal', vix: 'Primary Chart', instrumental: 'Instrumental Signal', index: 'Index', livechart: 'Live Chart', signallog: 'Signal Log', anomalylog: 'Anomaly Log', heatmap: 'Heat Map' };
 function updateWindowsMenuUI() {
   const body = $('windowsMenuBody'); if (!body) return; body.innerHTML = '';
   WM.wins.forEach((w, id) => {
@@ -390,13 +616,6 @@ function tickOf() {
   const el = $('orderflowLive'); if (el) { el.textContent = (next >= 0 ? '+' : '') + next.toFixed(1); el.style.color = next >= 0 ? cssVar('--c-green') : cssVar('--c-red'); }
   const sign = Math.sign(next);
   if (Math.abs(next) > 30) { if (S.ofConsec.sign === sign) { S.ofConsec.n++; if (S.ofConsec.n >= 3) checkOFAnom(next); } else S.ofConsec = { sign, n: 1 }; } else S.ofConsec = { sign: 0, n: 0 };
-}
-function tickVix() {
-  const prev = S.vix; S.prevVix = prev; const next = genVIX(prev); S.vix = next;
-  S.vixH.push(next); if (S.vixH.length > CFG.CHART_WIN) S.vixH.shift();
-  CHARTS.vix.data.datasets[0].data = [...S.vixH]; CHARTS.vix.data.labels = S.vixH.map((_, i) => i); CHARTS.vix.update('none');
-  if ($('vixLive')) $('vixLive').textContent = next.toFixed(1);
-  checkVixAnom(next, prev);
 }
 function tickSent() {
   const next = genSent(S.sent); S.sent = next;
@@ -437,9 +656,7 @@ function updateIndexWindow() {
 /* ── Instrumental Signal (15 stocks sorted) ──────────────── */
 function updateInstrumental() {
   const container = $('instrStocksList'); if (!container) return;
-  // Sort by pct descending
   const sorted = [...STOCKS].map(s => ({ ...s, ...S.stockPrices[s.sym] })).sort((a, b) => b.pct - a.pct);
-  // NIFTY header
   const niftyData = S.apiData?.NIFTY50 || { price: 22850, changePercent: 0.0 };
   const niftyPrice = $('instrNiftyPrice'), niftyDelta = $('instrNiftyDelta');
   if (niftyPrice) niftyPrice.textContent = fmtINR(niftyData.price || 22850);
@@ -450,6 +667,112 @@ function updateInstrumental() {
     '<div class="instr-section-hdr" style="margin-top:4px">TOP LOSERS</div>' +
     [...sorted].reverse().slice(0, 7).map((s, i) => `<div class="instr-row" data-sym="${s.sym}"><span class="instr-rank">${i + 1}</span><span class="instr-sym">${s.sym}</span><span class="instr-name">${s.name}</span><span class="instr-price">${fmtINR(s.price)}</span><span class="instr-pct neg">${s.pct.toFixed(2)}%</span><div class="instr-bar neg" style="width:${Math.round(Math.abs(s.pct) / maxAbs * 48)}px"></div></div>`).join('');
   container.querySelectorAll('.instr-row').forEach(row => row.addEventListener('click', () => openStockDetail(row.dataset.sym)));
+
+  // Update Stocks tab (favorites / top performers)
+  updateInstrFavTab(sorted);
+  if (S.instrumentalTab === 'indices') initIndicesTab();
+}
+
+function updateInstrFavTab(sorted) {
+  const fav = $('instrFavList'); if (!fav) return;
+  const top = sorted.slice(0, 8);
+  fav.innerHTML = top.map((s, i) => {
+    const spark = Array(6).fill(0).map(() => rand(-2,2));
+    const sparkMin = Math.min(...spark), sparkMax = Math.max(...spark);
+    const sparkPts = spark.map((v,j) => {
+      const x = j * 18;
+      const y = 20 - ((v - sparkMin) / Math.max(sparkMax - sparkMin, 0.1)) * 16;
+      return x + ',' + y;
+    }).join(' ');
+    return `<div class="instr-row fav-row" data-sym="${s.sym}">
+      <span class="instr-rank">${i+1}</span>
+      <div class="fav-main">
+        <span class="instr-sym">${s.sym}</span>
+        <span class="instr-pct ${s.pct>=0?'pos':'neg'}">${s.pct>=0?'+':''}${s.pct.toFixed(2)}%</span>
+      </div>
+      <svg class="fav-spark" width="90" height="24" viewBox="0 0 90 24">
+        <polyline points="${sparkPts}" fill="none" stroke="${s.pct>=0?'#30d158':'#ff453a'}" stroke-width="1.5"/>
+      </svg>
+      <span class="instr-price">${fmtINR(s.price)}</span>
+    </div>`;
+  }).join('');
+  fav.querySelectorAll('.instr-row').forEach(row => row.addEventListener('click', () => openStockDetail(row.dataset.sym)));
+}
+
+function initIndicesTab() {
+  const list = $('instrIndicesList'); if (!list) return;
+  const niftyData = S.apiData?.NIFTY50 || { price: INDICES[0].base, changePercent: INDICES[0].change };
+  if ($('instrIndicesUpdated')) {
+    $('instrIndicesUpdated').textContent = `${fmtINR(niftyData.price)} ${(niftyData.changePercent >= 0 ? '+' : '')}${(niftyData.changePercent || 0).toFixed(2)}%`;
+    $('instrIndicesUpdated').className = 'instr-nifty-delta ' + ((niftyData.changePercent || 0) >= 0 ? 'pos' : 'neg');
+  }
+  list.innerHTML = INDICES.map(idx => {
+    const pct = +(idx.change + rand(-0.15, 0.15)).toFixed(2);
+    const exBadge = `<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:var(--c-s3);color:var(--c-l4);margin-left:4px">${idx.exchange}</span>`;
+    return `<div class="instr-row index-row" data-sym="${idx.sym}">
+      <div class="idx-row-info">
+        <span class="instr-sym">${idx.sym}${exBadge}</span>
+        <span class="idx-row-name">${idx.name}</span>
+      </div>
+      <div class="idx-row-vals">
+        <span class="instr-price">${fmtINR(idx.base)}</span>
+        <span class="instr-pct ${pct>=0?'pos':'neg'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.index-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const sym = row.dataset.sym;
+      const idx = INDICES.find(i => i.sym === sym);
+      if (!idx) return;
+      // Load into live chart and primary chart
+      S.topGainerSym = sym;
+      S.primarySym = sym;
+      if ($('liveChartSym')) $('liveChartSym').textContent = sym;
+      initLiveChart();
+      initPrimaryChart();
+      // Update index window
+      if ($('indexSym')) $('indexSym').textContent = sym;
+      if ($('indexName')) $('indexName').textContent = idx.name;
+      if ($('indexPrice')) $('indexPrice').textContent = fmtINR(idx.base);
+      const pct = idx.change;
+      const idxDelta = $('indexDelta'); if (idxDelta) { idxDelta.textContent = (pct>=0?'+':'')+pct.toFixed(2)+'%'; idxDelta.className='index-delta '+(pct>=0?'pos':'neg'); }
+      if ($('indexChange')) $('indexChange').textContent = (pct >= 0 ? '+' : '') + fmtINR(Math.abs(idx.base * pct / 100));
+      if ($('indexHigh')) $('indexHigh').textContent = fmtINR(idx.base * 1.011);
+      if ($('indexLow')) $('indexLow').textContent = fmtINR(idx.base * 0.989);
+      if ($('indexBadge')) { $('indexBadge').textContent = `${idx.exchange} INDEX`; $('indexBadge').className = 'index-badge'; }
+      // Highlight selected row
+      list.querySelectorAll('.index-row').forEach(r => r.classList.toggle('instr-row--active', r.dataset.sym === sym));
+      // Switch to indices hint
+      if ($('instrIndicesUpdated')) $('instrIndicesUpdated').textContent = sym + ' loaded into charts';
+    });
+  });
+}
+
+function setInstrumentalTab(tab) {
+  const tabs = {
+    signal: { buttonId: 'instrTabSignal', panelId: 'instrPanelSignal' },
+    stocks: { buttonId: 'instrTabStocks', panelId: 'instrPanelStocks' },
+    indices: { buttonId: 'instrTabIndices', panelId: 'instrPanelIndices' },
+  };
+  S.instrumentalTab = tab;
+  Object.entries(tabs).forEach(([key, cfg]) => {
+    $(cfg.buttonId)?.classList.toggle('active', key === tab);
+    const panel = $(cfg.panelId);
+    if (panel) panel.style.display = key === tab ? '' : 'none';
+  });
+  if (tab === 'stocks') {
+    const sorted = [...STOCKS].map(s => ({ ...s, ...S.stockPrices[s.sym] })).sort((a, b) => b.pct - a.pct);
+    updateInstrFavTab(sorted);
+  }
+  if (tab === 'indices') initIndicesTab();
+}
+
+function initInstrumentalTabs() {
+  $('instrTabSignal')?.addEventListener('click', () => setInstrumentalTab('signal'));
+  $('instrTabStocks')?.addEventListener('click', () => setInstrumentalTab('stocks'));
+  $('instrTabIndices')?.addEventListener('click', () => setInstrumentalTab('indices'));
+  setInstrumentalTab(S.instrumentalTab);
 }
 
 /* ── Heatmap ─────────────────────────────────────────────── */
@@ -477,8 +800,19 @@ function initHeatmap() {
   }
 }
 function applyHeatColor(cell, pct) {
-  const a = Math.min(Math.abs(pct) / 2.5, 1), isDark = document.documentElement.getAttribute('data-theme') !== 'light';
-  cell.style.background = pct > 0 ? (isDark ? `rgba(0,${Math.round(80 + a * 140)},40,${0.3 + a * 0.55})` : `rgba(0,${Math.round(100 + a * 110)},60,${0.2 + a * 0.45})`) : (isDark ? `rgba(${Math.round(100 + a * 140)},20,20,${0.3 + a * 0.55})` : `rgba(${Math.round(160 + a * 80)},30,30,${0.2 + a * 0.45})`);
+  // Match reference image: solid bold green/dark-red blocks with white text
+  // Intensity mapped from ±5% range
+  const abs = Math.abs(pct);
+  const tier = abs < 0.5 ? 0 : abs < 1.0 ? 1 : abs < 2.0 ? 2 : abs < 3.5 ? 3 : 4;
+  if (pct > 0) {
+    const colors = ['#145214','#1a6b1a','#1f8c1f','#22a622','#25c025'];
+    cell.style.background = colors[tier];
+    cell.style.borderColor = 'rgba(48,209,88,0.3)';
+  } else {
+    const colors = ['#521414','#8c1a1a','#b02222','#cc2a2a','#e03030'];
+    cell.style.background = colors[tier];
+    cell.style.borderColor = 'rgba(255,69,58,0.3)';
+  }
 }
 function updateHeatmap() {
   STOCKS.forEach(s => {
@@ -529,11 +863,20 @@ function fireAnomaly({ winId, sev, stream, whisper, detail, conf }) {
 function addAnomalyRow({ sev, stream, whisper }) {
   const log = $('anomalyLog'); if (!log) return;
   const empty = log.querySelector('.fp-empty'); if (empty) empty.remove();
-  const row = document.createElement('div'); row.className = `anom-row ${sev}`;
-  row.innerHTML = `<div class="anom-row-hd"><span class="anom-stream ${sev[0]}">${stream}</span><span class="anom-time">${nowStr()}</span></div><div class="anom-msg">${whisper}</div>`;
+  const isAlert = sev === 'crit';
+  const sym = stream.split(' ')[0] || 'NSE';
+  const zscore = (rand(-3, -1.5)).toFixed(2);
+  const row = document.createElement('div');
+  row.className = `whisper-row ${isAlert ? 'whisper-alert' : 'whisper-whisper'}`;
+  row.innerHTML = `<span class="wh-time">${nowStr()}</span>`
+    + `<span class="wh-tag ${isAlert ? 'wh-tag--alert' : 'wh-tag--whisper'}">${isAlert ? 'ALERT' : 'WHISPER'}</span>`
+    + `<span class="wh-sym">${sym}</span>`
+    + `<span class="wh-msg">ZScore ${zscore} | ${whisper}</span>`;
   log.insertBefore(row, log.firstChild);
-  while (log.children.length > 20) log.removeChild(log.lastChild);
-  const cnt = $('anomalyCount'); if (cnt) cnt.textContent = log.children.length;
+  while (log.children.length > 30) log.removeChild(log.lastChild);
+  // Update count badge
+  const badge = $('anomalyAlertsCount');
+  if (badge) badge.textContent = 'ALERTS: ' + log.children.length;
 }
 function addAlertEntry({ sev, stream, whisper, detail, conf }) {
   S.anomCount++; const badge = $('alertCount'); if (badge) { badge.textContent = S.anomCount + S.alertCount; badge.className = 'alert-count'; }
@@ -549,20 +892,55 @@ function checkVixAnom(cur, prev) { if (cur > 65 && prev < 50) fireAnomaly({ winI
 
 /* ── Alert Generator ─────────────────────────────────────── */
 const ALERT_TMPL = [
-  () => { const s = STOCKS[Math.floor(rand(0, 15))]; return { stream: 'PRICE ALERT', sev: 'warn', whisper: `${s.sym} surged ${rand(1.5, 4).toFixed(1)}% in last 5 min`, detail: `\u20B9${s.base.toFixed(0)} | Vol: ${rand(2, 5).toFixed(1)}× normal`, conf: [70, 88] }; },
-  () => { const s = STOCKS[Math.floor(rand(0, 15))]; return { stream: 'VOLUME SPIKE', sev: 'crit', whisper: `Unusual volume in ${s.sym}`, detail: `${rand(3, 8).toFixed(1)}× avg volume`, conf: [75, 92] }; },
-  () => { const s = STOCKS[Math.floor(rand(0, 15))]; return { stream: 'RSI SIGNAL', sev: 'warn', whisper: `${s.sym} entering overbought`, detail: `RSI ${rand(70, 85).toFixed(0)}`, conf: [65, 82] }; },
-  () => ({ stream: 'MACD', sev: 'crit', whisper: 'MACD bullish crossover on NIFTY 50', detail: 'Signal line crossed', conf: [72, 87] }),
+  () => { const s = STOCKS[Math.floor(rand(0, 15))]; return { stream: s.sym+' PRICE', sev: 'warn', whisper: `Price drop detected`, detail: `\u20B9${s.base.toFixed(0)} | Vol: ${rand(2, 5).toFixed(1)}× normal`, conf: [70, 88] }; },
+  () => { const s = STOCKS[Math.floor(rand(0, 15))]; return { stream: s.sym+' VOL', sev: 'crit', whisper: `Unusual volume detected`, detail: `${rand(3, 8).toFixed(1)}× avg volume`, conf: [75, 92] }; },
+  () => { const s = STOCKS[Math.floor(rand(0, 15))]; return { stream: s.sym+' RSI', sev: 'warn', whisper: `Unusual movement`, detail: `RSI ${rand(70, 85).toFixed(0)}`, conf: [65, 82] }; },
+  () => { const s = STOCKS[Math.floor(rand(0, 15))]; return { stream: s.sym+' MACD', sev: 'warn', whisper: `MACD bullish crossover`, detail: 'Signal line crossed', conf: [72, 87] }; },
+  () => { const s = STOCKS[Math.floor(rand(0, 15))]; return { stream: s.sym+' FLOW', sev: 'warn', whisper: `Unusual movement`, detail: 'Order flow divergence', conf: [60, 78] }; },
+  () => { const s = STOCKS[Math.floor(rand(0, 15))]; return { stream: s.sym+' BB', sev: 'crit', whisper: `Price drop detected`, detail: 'Bollinger band squeeze', conf: [68, 85] }; },
 ];
 function scheduleNextAlert() { setTimeout(() => { const t = ALERT_TMPL[Math.floor(rand(0, ALERT_TMPL.length))](); const wids = ['orderflow', 'vix']; WM.pulseWin(wids[Math.floor(rand(0, wids.length))], t.sev); addAlertEntry(t); addAnomalyRow(t); S.alertCount++; const b = $('alertCount'); if (b) { b.textContent = S.anomCount + S.alertCount; b.className = 'alert-count'; } scheduleNextAlert(); }, rand(CFG.ALERT_MIN, CFG.ALERT_MAX)); }
 
 /* ── Stock Detail Modal ──────────────────────────────────── */
+let MODAL_CHART = null;
+function buildModalChart(sym, period) {
+  const canvas = $('modalChart'); if (!canvas) return;
+  if (MODAL_CHART) { MODAL_CHART.destroy(); MODAL_CHART = null; }
+  const raw = getCandleData(sym, period || '1D');
+  const labels = raw.map(pt => {
+    const d = new Date(pt.x);
+    if (!period || period === '1D') return d.getHours()+':'+String(d.getMinutes()).padStart(2,'0');
+    if (period === '1W') return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+    if (period === '1Y') return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+    return d.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+  });
+  const cd = raw.map((pt,i) => ({x:i,o:pt.o,h:pt.h,l:pt.l,c:pt.c}));
+  try {
+    MODAL_CHART = new Chart(canvas.getContext('2d'), {
+      type: 'candlestick',
+      data: { labels, datasets: [{ data: cd, color:{up:'#30d158',down:'#ff453a',unchanged:'#888'}, borderColor:{up:'#30d158',down:'#ff453a',unchanged:'#888'} }] },
+      options: { responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false},tooltip:{enabled:false}}, scales:{x:{type:'category',grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},maxTicksLimit:8}},y:{position:'right',grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},callback:v=>fmtINR(v),maxTicksLimit:5},border:{display:false}}} }
+    });
+  } catch(err) { console.warn('Modal chart error:', err); }
+}
+
 async function openStockDetail(sym) {
+  S.modalSym = sym; S.modalPeriod = '1D';
   const overlay = $('stockModalOverlay'); if (!overlay) return;
   $('modalSym').textContent = sym; $('modalName').textContent = '...'; $('modalSector').textContent = '...';
   $('modalPrice').textContent = '\u20B9---'; $('modalDelta').textContent = '---%'; $('modalDelta').className = 'stock-modal-delta';
-  $('modalChange').textContent = '---'; $('modalHigh').textContent = '---'; $('modalLow').textContent = '---'; $('modalVolume').textContent = '---'; $('modalSource').textContent = '---'; $('modalUpdated').textContent = 'Fetching...';
+  $('modalChange').textContent = '---';
+  if ($('modalHigh')) $('modalHigh').textContent = '---';
+  if ($('modalLow')) $('modalLow').textContent = '---';
+  if ($('modalVolume')) $('modalVolume').textContent = '---';
+  if ($('modalSource')) $('modalSource').textContent = '---';
+  if ($('modalOpen')) $('modalOpen').textContent = '---';
+  if ($('modalPrevClose')) $('modalPrevClose').textContent = '---';
+  $('modalUpdated').textContent = 'Fetching...';
+  document.querySelectorAll('.smp-tab').forEach(b => b.classList.toggle('active', b.dataset.speriod === '1D'));
   overlay.classList.add('open');
+  // Build chart immediately with local data
+  buildModalChart(sym, '1D');
   try {
     const r = await fetch(`/api/stock/${sym}`); const { quote: q } = await r.json(); if (!q) throw new Error();
     $('modalSym').textContent = q.symbol; $('modalName').textContent = q.name || sym; $('modalSector').textContent = q.sector || 'N/A';
@@ -570,12 +948,16 @@ async function openStockDetail(sym) {
     const pct = q.changePercent ?? 0, chg = q.change ?? 0, isPos = pct >= 0;
     $('modalDelta').textContent = (isPos ? '+' : '') + pct.toFixed(2) + '%'; $('modalDelta').className = 'stock-modal-delta ' + (isPos ? 'pos' : 'neg');
     $('modalChange').textContent = (isPos ? '+' : '') + fmtINR(Math.abs(chg)); $('modalChange').className = 'stock-modal-change ' + (isPos ? 'pos' : 'neg');
-    $('modalHigh').textContent = q.high ? fmtINR(q.high) : '---'; $('modalLow').textContent = q.low ? fmtINR(q.low) : '---';
-    $('modalVolume').textContent = q.volume ? fmtNum(q.volume) : '---'; $('modalSource').textContent = q.source === 'yahoo' ? 'Yahoo Finance' : 'Simulated';
+    if ($('modalHigh')) $('modalHigh').textContent = q.high ? fmtINR(q.high) : '---';
+    if ($('modalLow')) $('modalLow').textContent = q.low ? fmtINR(q.low) : '---';
+    if ($('modalVolume')) $('modalVolume').textContent = q.volume ? fmtNum(q.volume) : '---';
+    if ($('modalSource')) $('modalSource').textContent = q.source === 'yahoo' ? 'Yahoo Finance' : 'Simulated';
+    if ($('modalOpen')) $('modalOpen').textContent = q.open ? fmtINR(q.open) : '---';
+    if ($('modalPrevClose')) $('modalPrevClose').textContent = q.previousClose ? fmtINR(q.previousClose) : '---';
     $('modalUpdated').textContent = `Last updated: ${fmtTime()}`;
-  } catch (_) { $('modalUpdated').textContent = 'Error fetching data'; }
+  } catch (_) { $('modalUpdated').textContent = 'Showing simulated data'; }
 }
-function closeStockModal() { $('stockModalOverlay')?.classList.remove('open'); }
+function closeStockModal() { $('stockModalOverlay')?.classList.remove('open'); S.modalSym = null; if (MODAL_CHART) { MODAL_CHART.destroy(); MODAL_CHART = null; } }
 
 /* ── Search ──────────────────────────────────────────────── */
 function searchStocks(query) { const q = query.trim().toUpperCase(); if (!q) return []; return SEARCH_INDEX.map(s => { let sc = 0; if (s.sym === q) sc = 100; else if (s.sym.startsWith(q)) sc = 80; else if (s.name.toUpperCase().startsWith(q)) sc = 60; else if (s.sym.includes(q)) sc = 40; else if (s.name.toUpperCase().includes(q)) sc = 20; return sc > 0 ? { ...s, sc } : null; }).filter(Boolean).sort((a, b) => b.sc - a.sc).slice(0, 8); }
@@ -596,6 +978,10 @@ function renderSearchResults(results, dd) {
 
 /* ── Stock Window ────────────────────────────────────────── */
 function openStockWindow(sym) {
+  // Open the proper stock detail modal instead of a floating window
+  openStockDetail(sym);
+  return;
+  // eslint-disable-next-line no-unreachable
   const ld = S.stockPrices[sym] || S.apiData?.[sym]; if (!ld) return;
   const winId = 'stock_' + sym;
   let win = $('win-' + winId);
@@ -641,26 +1027,145 @@ function openStockWindow(sym) {
 }
 
 /* ── Period Tabs ─────────────────────────────────────────── */
-function setPeriod(p) {
-  S.activePeriod = p;
-  document.querySelectorAll('.period-tab').forEach(b => b.classList.toggle('active', b.dataset.period === p));
-  let pts = 90;
-  if(p==='1W') pts = 60;
-  if(p==='1M') pts = 30;
-  if(p==='1Y') pts = 12;
-  CFG.CHART_WIN = pts; CFG.SEED = Math.max(20, pts - 10);
-  
-  S.ofH = seed(genOF, CFG.SEED);
-  S.vixH = seed(genVIX, CFG.SEED);
-  S.sentH = seed(genSent, CFG.SEED);
-  
-  initLiveChart(); initOFChart(); initSentChart(); initVixChart();
+function setPeriod(p, chartType) {
+  if (chartType === 'primary') {
+    S.primaryPeriod = p;
+    document.querySelectorAll('#primaryPeriodTabs .period-tab').forEach(b => b.classList.toggle('active', b.dataset.period === p));
+    initPrimaryChart();
+  } else if (chartType === 'modal') {
+    S.modalPeriod = p;
+    document.querySelectorAll('.smp-tab').forEach(b => b.classList.toggle('active', b.dataset.speriod === p));
+    if (S.modalSym) buildModalChart(S.modalSym, p);
+  } else {
+    // Live chart
+    S.activePeriod = p;
+    document.querySelectorAll('#periodTabs .period-tab').forEach(b => b.classList.toggle('active', b.dataset.period === p));
+    initLiveChart();
+  }
 }
 
 function initPeriodTabs() {
-  document.querySelectorAll('.period-tab').forEach(btn => {
-    btn.addEventListener('click', () => setPeriod(btn.dataset.period));
+  // Live chart period tabs
+  document.querySelectorAll('#periodTabs .period-tab').forEach(btn => {
+    btn.addEventListener('click', () => setPeriod(btn.dataset.period, 'live'));
   });
+  // Primary chart period tabs
+  document.querySelectorAll('#primaryPeriodTabs .period-tab').forEach(btn => {
+    btn.addEventListener('click', () => setPeriod(btn.dataset.period, 'primary'));
+  });
+  // Modal period tabs
+  document.querySelectorAll('.smp-tab').forEach(btn => {
+    btn.addEventListener('click', () => setPeriod(btn.dataset.speriod, 'modal'));
+  });
+}
+
+/* ── AI Market Narrator ──────────────────────────────────── */
+const AI_NARRATIVES = [
+  () => { const s = STOCKS[Math.floor(rand(0,15))]; const pct = S.stockPrices[s.sym]?.pct||0; return pct>0 ? `${s.sym} is pushing above resistance with ${(rand(2,4)).toFixed(1)}× volume — momentum remains bullish. Order flow flipping net positive.` : `${s.sym} failing to hold support at ${fmtINR(s.base)}. Selling pressure intensifying, watch for further downside.`; },
+  () => `NIFTY 50 consolidating near ${fmtINR(22850 + rand(-200,200))}. Breadth indicators suggest cautious optimism — ${Math.round(rand(30,45))} stocks advancing vs ${Math.round(rand(20,35))} declining.`,
+  () => { const it = STOCKS.filter(s=>s.sector==='IT'); const s=it[Math.floor(rand(0,it.length))]; return `IT sector showing relative strength. ${s.sym} leading with SMAs converging positively — golden cross setup forming.`; },
+  () => `Bank Nifty diverging from Nifty 50 — spread widening to ${rand(80,180).toFixed(0)} points. HDFC Bank and ICICI Bank driving sector movement.`,
+  () => { const fin = STOCKS.filter(s=>s.sector==='Finance'); const s=fin[Math.floor(rand(0,fin.length))]; return `${s.sym} order flow data: net institutional buying observed in last 30 minutes. RSI at ${rand(55,72).toFixed(0)} — not yet overbought.`; },
+  () => `Market breadth neutral-to-positive. VIX declining, implying reduced fear. Short-term reversal signals visible on ${STOCKS[Math.floor(rand(0,15))].sym}.`,
+  () => `Sector rotation underway — Energy stocks cooling while Pharma picks up relative momentum. Watch SUNPHARMA near key level.`,
+  () => { const s = STOCKS[Math.floor(rand(0,15))]; return `${s.sym} printing a ${rand(0,1)>0.5?'bullish engulfing':'doji'} pattern on the daily chart. Volume confirmation needed for breakout.`; },
+];
+
+let aiNarratorInterval = null;
+let aiPanelState = { open: false, minimized: false, maximized: false, savedRect: null };
+
+function pushAINarrative() {
+  const text = $('aiNarrativeText'); if (!text) return;
+  const msg = AI_NARRATIVES[Math.floor(rand(0, AI_NARRATIVES.length))]();
+  text.style.opacity = '0'; text.style.transform = 'translateY(6px)';
+  setTimeout(() => {
+    text.textContent = msg;
+    text.style.transition = 'opacity 0.5s, transform 0.5s';
+    text.style.opacity = '1'; text.style.transform = 'translateY(0)';
+  }, 300);
+  // Also push to stream
+  const stream = $('aiNarrativeStream'); if (!stream) return;
+  const entry = document.createElement('div');
+  entry.className = 'ai-stream-entry'; entry.textContent = `[${fmtTime()}] ${msg}`;
+  stream.insertBefore(entry, stream.firstChild);
+  while (stream.children.length > 20) stream.removeChild(stream.lastChild);
+}
+
+function initAINarrator() {
+  const panel = $('aiNarratorPanel'); if (!panel) return;
+  const btn = $('aiNarratorBtn');
+  const closeBtn = $('aiCloseBtn'), minBtn = $('aiMinBtn'), maxBtn = $('aiMaxBtn');
+  const resizeHandle = $('aiResizeHandle');
+
+  // Make panel draggable
+  const chrome = panel.querySelector('.ai-panel-chrome');
+  let drag = null;
+  if (chrome) {
+    chrome.addEventListener('mousedown', e => {
+      if (e.target.closest('.ai-panel-controls')) return;
+      e.preventDefault();
+      const r = panel.getBoundingClientRect();
+      drag = { sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
+      const ovl = document.createElement('div'); ovl.style.cssText='position:fixed;inset:0;z-index:99999;cursor:grab;'; ovl.id='aiDragOvl'; document.body.appendChild(ovl);
+      ovl.addEventListener('mousemove', mv => { panel.style.left=(drag.ol+mv.clientX-drag.sx)+'px'; panel.style.top=(drag.ot+mv.clientY-drag.sy)+'px'; });
+      ovl.addEventListener('mouseup', () => { drag=null; ovl.remove(); });
+      window.addEventListener('mouseup', ()=>{drag=null;$('aiDragOvl')?.remove();},{once:true});
+    });
+  }
+
+  // Resizable
+  if (resizeHandle) {
+    let rzDrag = null;
+    resizeHandle.addEventListener('mousedown', e => {
+      e.preventDefault(); e.stopPropagation();
+      const r = panel.getBoundingClientRect();
+      rzDrag = { sx: e.clientX, sy: e.clientY, ow: r.width, oh: r.height };
+      const ovl = document.createElement('div'); ovl.style.cssText='position:fixed;inset:0;z-index:99999;cursor:se-resize;'; ovl.id='aiRzOvl'; document.body.appendChild(ovl);
+      ovl.addEventListener('mousemove', mv => { panel.style.width=Math.max(280,rzDrag.ow+mv.clientX-rzDrag.sx)+'px'; panel.style.height=Math.max(180,rzDrag.oh+mv.clientY-rzDrag.sy)+'px'; });
+      ovl.addEventListener('mouseup', ()=>{rzDrag=null;ovl.remove();});
+      window.addEventListener('mouseup',()=>{rzDrag=null;$('aiRzOvl')?.remove();},{once:true});
+    });
+  }
+
+  // Toggle open
+  if (btn) btn.addEventListener('click', () => {
+    if (aiPanelState.open) { panel.style.display='none'; aiPanelState.open=false; }
+    else { panel.style.display='flex'; aiPanelState.open=true; panel.classList.add('ai-open'); pushAINarrative(); }
+  });
+
+  // Close
+  if (closeBtn) closeBtn.addEventListener('click', () => { panel.style.display='none'; aiPanelState.open=false; });
+
+  // Minimize — collapse to chrome only
+  if (minBtn) minBtn.addEventListener('click', () => {
+    const body = $('aiNarratorBody'), footer = panel.querySelector('.ai-panel-footer');
+    if (aiPanelState.minimized) {
+      if (body) body.style.display='';
+      if (footer) footer.style.display='';
+      panel.style.height=''; aiPanelState.minimized=false; minBtn.title='Minimize';
+    } else {
+      if (body) body.style.display='none';
+      if (footer) footer.style.display='none';
+      aiPanelState.minimized=true; minBtn.title='Restore';
+    }
+  });
+
+  // Maximize
+  if (maxBtn) maxBtn.addEventListener('click', () => {
+    if (aiPanelState.maximized) {
+      const r = aiPanelState.savedRect;
+      if (r) { panel.style.cssText=r; }
+      aiPanelState.maximized=false; maxBtn.title='Maximize';
+    } else {
+      aiPanelState.savedRect = panel.style.cssText;
+      panel.style.cssText='position:fixed;top:80px;left:0;right:0;bottom:0;width:100vw;height:calc(100vh - 80px);z-index:7000;display:flex;flex-direction:column;border-radius:0;';
+      aiPanelState.maximized=true; maxBtn.title='Restore';
+    }
+  });
+
+  // Start narrative interval
+  if (aiNarratorInterval) clearInterval(aiNarratorInterval);
+  aiNarratorInterval = setInterval(() => { if (aiPanelState.open) pushAINarrative(); }, 5000);
 }
 
 /* ── Theme / Panels ──────────────────────────────────────── */
@@ -687,7 +1192,12 @@ function wireEvents() {
   $('themeDark')?.addEventListener('click', () => setTheme('dark'));
   $('themeLight')?.addEventListener('click', () => setTheme('light'));
   $('stockModalClose')?.addEventListener('click', closeStockModal);
+  $('stockModalBack')?.addEventListener('click', closeStockModal);
   $('stockModalOverlay')?.addEventListener('click', e => { if (e.target === $('stockModalOverlay')) closeStockModal(); });
+  // Modal period tabs
+  document.querySelectorAll('.smp-tab').forEach(btn => {
+    btn.addEventListener('click', () => setPeriod(btn.dataset.speriod, 'modal'));
+  });
   document.addEventListener('click', e => { ['settingsPanel', 'alertsPanel', 'windowsMenu'].forEach(id => { const el = $(id); if (el?.classList.contains('open') && !el.contains(e.target) && e.target.id !== ({ settingsPanel: 'settingsBtn', alertsPanel: 'alertBtn', windowsMenu: 'windowsMenuBtn' }[id])) el.classList.remove('open'); }); }, { capture: false });
   document.addEventListener('keydown', e => { if (e.ctrlKey || e.metaKey) { if (e.key === 'r') { e.preventDefault(); applyDefaultLayout(); } if (e.key === 'a') { e.preventDefault(); togglePanel('alertsPanel'); } } });
 }
@@ -697,29 +1207,27 @@ function main() {
   try {
     updateClock(); setInterval(updateClock, 1000);
     ['orderflow', 'sentimental', 'vix', 'instrumental', 'index', 'livechart', 'signallog', 'anomalylog', 'heatmap'].forEach(id => WM.register(id));
-    // Defer layout to ensure the desktop has been fully laid out by the browser
     requestAnimationFrame(() => {
       applyDefaultLayout();
-      // Re-init charts after layout is applied so canvases have proper dimensions
       try { initCharts(); } catch (e) { console.warn('Charts init error:', e); }
     });
     initHeatmap(); rebuildTicker();
-    for (let i = 0; i < 8; i++)pushSignalEntry();
+    for (let i = 0; i < 8; i++) pushSignalEntry();
+    for (let i = 0; i < 6; i++) { const t = ALERT_TMPL[Math.floor(rand(0, ALERT_TMPL.length))](); addAnomalyRow(t); }
     initDrag(); initSearch(); initPeriodTabs(); wireEvents();
     updateIndexWindow(); updateInstrumental(); updateSentUI(S.sent);
+    initInstrumentalTabs();
+    initAINarrator();
     setInterval(tickOf, CFG.OF_TICK);
-    setInterval(tickVix, CFG.VIX_TICK);
     setInterval(tickSent, CFG.SENT_TICK);
     setInterval(updateHeatmap, CFG.HEATMAP_TICK);
     setInterval(pushSignalEntry, CFG.LOG_TICK);
     setInterval(fetchAPIData, CFG.API_POLL);
     fetchAPIData();
     scheduleNextAlert();
-    // Recompute layout on window resize
     let resizeTimer = null;
     window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { applyDefaultLayout(); }, 150); });
   } catch (e) { console.error('Fatal main error:', e); }
-  // Boot always runs \u2014 even if something above failed silently
   runBoot();
 }
 export function initApp() { main(); }
