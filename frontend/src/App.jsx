@@ -147,12 +147,6 @@ export default function App() {
             </div>
             <span className="window-title">PRIMARY CHART — <span id="primaryChartSym">AAPL</span></span>
             <div className="window-meta">
-              <div className="period-tabs" id="primaryPeriodTabs">
-                <button className="period-tab active" data-period="1D">1D</button>
-                <button className="period-tab" data-period="1W">1W</button>
-                <button className="period-tab" data-period="1M">1M</button>
-                <button className="period-tab" data-period="1Y">1Y</button>
-              </div>
               <span className="live-dot"></span>
             </div>
           </div>
@@ -189,8 +183,6 @@ export default function App() {
             <div className="window-meta">
               <div className="instr-tabs">
                 <button className="instr-tab active" id="instrTabSignal">Signal</button>
-                <button className="instr-tab" id="instrTabStocks">Stocks</button>
-                <button className="instr-tab" id="instrTabIndices">Indices</button>
               </div>
               <span className="live-dot"></span>
             </div>
@@ -206,28 +198,6 @@ export default function App() {
                 </div>
                 <div className="instr-divider"></div>
                 <div className="instr-stocks-list" id="instrStocksList"></div>
-              </div>
-            </div>
-            {/* Tab: Stocks (Favorites / Top Gainers) */}
-            <div className="instr-panel" id="instrPanelStocks" style={{display:'none'}}>
-              <div className="instr-body">
-                <div className="instr-header">
-                  <div className="instr-nifty-label">TOP PERFORMERS</div>
-                  <div className="instr-nifty-delta pos" id="instrStocksUpdated">Live</div>
-                </div>
-                <div className="instr-divider"></div>
-                <div className="instr-stocks-list" id="instrFavList"></div>
-              </div>
-            </div>
-            {/* Tab: Indices */}
-            <div className="instr-panel" id="instrPanelIndices" style={{display:'none'}}>
-              <div className="instr-body">
-                <div className="instr-header">
-                  <div className="instr-nifty-label">INDICES</div>
-                  <div className="instr-nifty-delta" id="instrIndicesUpdated">Click index to load chart</div>
-                </div>
-                <div className="instr-divider"></div>
-                <div className="instr-stocks-list" id="instrIndicesList"></div>
               </div>
             </div>
           </div>
@@ -273,12 +243,6 @@ export default function App() {
             </div>
             <span className="window-title">LIVE CHART — <span id="liveChartSym">---</span></span>
             <div className="window-meta">
-              <div className="period-tabs" id="periodTabs">
-                <button className="period-tab active" data-period="1D">1D</button>
-                <button className="period-tab" data-period="1W">1W</button>
-                <button className="period-tab" data-period="1M">1M</button>
-                <button className="period-tab" data-period="1Y">1Y</button>
-              </div>
               <span className="live-dot"></span>
             </div>
           </div>

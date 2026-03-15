@@ -66,7 +66,7 @@ function computeRollingZScore(values, period = 20) {
   return (slice.at(-1) - mean) / std;
 }
 
-const S = { of: 0, ofH: [], ofConsec: { sign: 0, n: 0 }, vix: 28, vixH: [], prevVix: 28, sent: 0.12, sentH: [], stockPrices: {}, apiData: null, lastAnomaly: 0, anomCount: 0, alertCount: 0, topGainerSym: 'TCS', activePeriod: '1D', primarySym: 'RELIANCE', primaryPeriod: '1D', modalSym: null, modalPeriod: '1D', instrumentalTab: 'signal' };
+const S = { of: 0, ofH: [], ofConsec: { sign: 0, n: 0 }, vix: 28, vixH: [], prevVix: 28, sent: 0.12, sentH: [], stockPrices: {}, apiData: null, lastAnomaly: 0, anomCount: 0, alertCount: 0, topGainerSym: 'TCS', primarySym: 'RELIANCE', modalSym: null, modalPeriod: '1D' };
 
 /* ── Indices Universe ────────────────────────────────────── */
 const INDICES = [
@@ -163,9 +163,9 @@ function initLiveChart() {
     if (CHARTS.live) { CHARTS.live.destroy(); delete CHARTS.live; }
     const ctx = canvas.getContext('2d');
     const sym = S.topGainerSym || 'TCS';
-    const raw = getCandleData(sym, S.activePeriod);
+    const raw = getCandleData(sym, '1D');
     if ($('liveChartSym')) $('liveChartSym').textContent = sym;
-    const labels = raw.map(pt => formatCandleLabel(pt.x, S.activePeriod));
+    const labels = raw.map(pt => formatCandleLabel(pt.x, '1D'));
     const candleData = raw.map((pt, i) => ({ x: i, o: pt.o, h: pt.h, l: pt.l, c: pt.c }));
     const upColor = cssVar('--c-green') || '#30d158';
     const dnColor = cssVar('--c-red') || '#ff453a';
@@ -180,7 +180,7 @@ function initLiveChart() {
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
         scales: {
-          x: { type: 'category', grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: 'rgba(255,255,255,0.35)', font: { size: 9 }, maxTicksLimit: S.activePeriod === '1Y' ? 12 : 8 } },
+          x: { type: 'category', grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: 'rgba(255,255,255,0.35)', font: { size: 9 }, maxTicksLimit: 8 } },
           y: { position: 'right', grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: 'rgba(255,255,255,0.35)', font: { size: 9 }, callback: v => fmtINR(v), maxTicksLimit: 6 }, border: { display: false } }
         }
       }
@@ -323,7 +323,7 @@ function initPrimaryChart() {
   try {
     destroyPrimaryChart();
     const sym = S.primarySym || 'RELIANCE';
-    const raw = getCandleData(sym, S.primaryPeriod);
+    const raw = getCandleData(sym, '1D');
     const closes = raw.map(p => p.c);
     const first = raw[0], last = raw[raw.length - 1];
     const hi = Math.max(...raw.map(p => p.h)), lo = Math.min(...raw.map(p => p.l));
@@ -344,7 +344,7 @@ function initPrimaryChart() {
       },
       timeScale: {
         borderColor: 'rgba(255,255,255,0.08)',
-        timeVisible: S.primaryPeriod === '1D' || S.primaryPeriod === '1W',
+        timeVisible: true,
         secondsVisible: false,
       },
       crosshair: {
@@ -667,112 +667,6 @@ function updateInstrumental() {
     '<div class="instr-section-hdr" style="margin-top:4px">TOP LOSERS</div>' +
     [...sorted].reverse().slice(0, 7).map((s, i) => `<div class="instr-row" data-sym="${s.sym}"><span class="instr-rank">${i + 1}</span><span class="instr-sym">${s.sym}</span><span class="instr-name">${s.name}</span><span class="instr-price">${fmtINR(s.price)}</span><span class="instr-pct neg">${s.pct.toFixed(2)}%</span><div class="instr-bar neg" style="width:${Math.round(Math.abs(s.pct) / maxAbs * 48)}px"></div></div>`).join('');
   container.querySelectorAll('.instr-row').forEach(row => row.addEventListener('click', () => openStockDetail(row.dataset.sym)));
-
-  // Update Stocks tab (favorites / top performers)
-  updateInstrFavTab(sorted);
-  if (S.instrumentalTab === 'indices') initIndicesTab();
-}
-
-function updateInstrFavTab(sorted) {
-  const fav = $('instrFavList'); if (!fav) return;
-  const top = sorted.slice(0, 8);
-  fav.innerHTML = top.map((s, i) => {
-    const spark = Array(6).fill(0).map(() => rand(-2,2));
-    const sparkMin = Math.min(...spark), sparkMax = Math.max(...spark);
-    const sparkPts = spark.map((v,j) => {
-      const x = j * 18;
-      const y = 20 - ((v - sparkMin) / Math.max(sparkMax - sparkMin, 0.1)) * 16;
-      return x + ',' + y;
-    }).join(' ');
-    return `<div class="instr-row fav-row" data-sym="${s.sym}">
-      <span class="instr-rank">${i+1}</span>
-      <div class="fav-main">
-        <span class="instr-sym">${s.sym}</span>
-        <span class="instr-pct ${s.pct>=0?'pos':'neg'}">${s.pct>=0?'+':''}${s.pct.toFixed(2)}%</span>
-      </div>
-      <svg class="fav-spark" width="90" height="24" viewBox="0 0 90 24">
-        <polyline points="${sparkPts}" fill="none" stroke="${s.pct>=0?'#30d158':'#ff453a'}" stroke-width="1.5"/>
-      </svg>
-      <span class="instr-price">${fmtINR(s.price)}</span>
-    </div>`;
-  }).join('');
-  fav.querySelectorAll('.instr-row').forEach(row => row.addEventListener('click', () => openStockDetail(row.dataset.sym)));
-}
-
-function initIndicesTab() {
-  const list = $('instrIndicesList'); if (!list) return;
-  const niftyData = S.apiData?.NIFTY50 || { price: INDICES[0].base, changePercent: INDICES[0].change };
-  if ($('instrIndicesUpdated')) {
-    $('instrIndicesUpdated').textContent = `${fmtINR(niftyData.price)} ${(niftyData.changePercent >= 0 ? '+' : '')}${(niftyData.changePercent || 0).toFixed(2)}%`;
-    $('instrIndicesUpdated').className = 'instr-nifty-delta ' + ((niftyData.changePercent || 0) >= 0 ? 'pos' : 'neg');
-  }
-  list.innerHTML = INDICES.map(idx => {
-    const pct = +(idx.change + rand(-0.15, 0.15)).toFixed(2);
-    const exBadge = `<span style="font-size:8px;padding:1px 4px;border-radius:3px;background:var(--c-s3);color:var(--c-l4);margin-left:4px">${idx.exchange}</span>`;
-    return `<div class="instr-row index-row" data-sym="${idx.sym}">
-      <div class="idx-row-info">
-        <span class="instr-sym">${idx.sym}${exBadge}</span>
-        <span class="idx-row-name">${idx.name}</span>
-      </div>
-      <div class="idx-row-vals">
-        <span class="instr-price">${fmtINR(idx.base)}</span>
-        <span class="instr-pct ${pct>=0?'pos':'neg'}">${pct>=0?'+':''}${pct.toFixed(2)}%</span>
-      </div>
-    </div>`;
-  }).join('');
-  list.querySelectorAll('.index-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const sym = row.dataset.sym;
-      const idx = INDICES.find(i => i.sym === sym);
-      if (!idx) return;
-      // Load into live chart and primary chart
-      S.topGainerSym = sym;
-      S.primarySym = sym;
-      if ($('liveChartSym')) $('liveChartSym').textContent = sym;
-      initLiveChart();
-      initPrimaryChart();
-      // Update index window
-      if ($('indexSym')) $('indexSym').textContent = sym;
-      if ($('indexName')) $('indexName').textContent = idx.name;
-      if ($('indexPrice')) $('indexPrice').textContent = fmtINR(idx.base);
-      const pct = idx.change;
-      const idxDelta = $('indexDelta'); if (idxDelta) { idxDelta.textContent = (pct>=0?'+':'')+pct.toFixed(2)+'%'; idxDelta.className='index-delta '+(pct>=0?'pos':'neg'); }
-      if ($('indexChange')) $('indexChange').textContent = (pct >= 0 ? '+' : '') + fmtINR(Math.abs(idx.base * pct / 100));
-      if ($('indexHigh')) $('indexHigh').textContent = fmtINR(idx.base * 1.011);
-      if ($('indexLow')) $('indexLow').textContent = fmtINR(idx.base * 0.989);
-      if ($('indexBadge')) { $('indexBadge').textContent = `${idx.exchange} INDEX`; $('indexBadge').className = 'index-badge'; }
-      // Highlight selected row
-      list.querySelectorAll('.index-row').forEach(r => r.classList.toggle('instr-row--active', r.dataset.sym === sym));
-      // Switch to indices hint
-      if ($('instrIndicesUpdated')) $('instrIndicesUpdated').textContent = sym + ' loaded into charts';
-    });
-  });
-}
-
-function setInstrumentalTab(tab) {
-  const tabs = {
-    signal: { buttonId: 'instrTabSignal', panelId: 'instrPanelSignal' },
-    stocks: { buttonId: 'instrTabStocks', panelId: 'instrPanelStocks' },
-    indices: { buttonId: 'instrTabIndices', panelId: 'instrPanelIndices' },
-  };
-  S.instrumentalTab = tab;
-  Object.entries(tabs).forEach(([key, cfg]) => {
-    $(cfg.buttonId)?.classList.toggle('active', key === tab);
-    const panel = $(cfg.panelId);
-    if (panel) panel.style.display = key === tab ? '' : 'none';
-  });
-  if (tab === 'stocks') {
-    const sorted = [...STOCKS].map(s => ({ ...s, ...S.stockPrices[s.sym] })).sort((a, b) => b.pct - a.pct);
-    updateInstrFavTab(sorted);
-  }
-  if (tab === 'indices') initIndicesTab();
-}
-
-function initInstrumentalTabs() {
-  $('instrTabSignal')?.addEventListener('click', () => setInstrumentalTab('signal'));
-  $('instrTabStocks')?.addEventListener('click', () => setInstrumentalTab('stocks'));
-  $('instrTabIndices')?.addEventListener('click', () => setInstrumentalTab('indices'));
-  setInstrumentalTab(S.instrumentalTab);
 }
 
 /* ── Heatmap ─────────────────────────────────────────────── */
@@ -1029,30 +923,19 @@ function openStockWindow(sym) {
 /* ── Period Tabs ─────────────────────────────────────────── */
 function setPeriod(p, chartType) {
   if (chartType === 'primary') {
-    S.primaryPeriod = p;
-    document.querySelectorAll('#primaryPeriodTabs .period-tab').forEach(b => b.classList.toggle('active', b.dataset.period === p));
+    // Primary chart timeframe switch removed; keep a fixed view.
     initPrimaryChart();
   } else if (chartType === 'modal') {
     S.modalPeriod = p;
     document.querySelectorAll('.smp-tab').forEach(b => b.classList.toggle('active', b.dataset.speriod === p));
     if (S.modalSym) buildModalChart(S.modalSym, p);
   } else {
-    // Live chart
-    S.activePeriod = p;
-    document.querySelectorAll('#periodTabs .period-tab').forEach(b => b.classList.toggle('active', b.dataset.period === p));
+    // Live chart timeframe switch removed; keep a fixed view.
     initLiveChart();
   }
 }
 
 function initPeriodTabs() {
-  // Live chart period tabs
-  document.querySelectorAll('#periodTabs .period-tab').forEach(btn => {
-    btn.addEventListener('click', () => setPeriod(btn.dataset.period, 'live'));
-  });
-  // Primary chart period tabs
-  document.querySelectorAll('#primaryPeriodTabs .period-tab').forEach(btn => {
-    btn.addEventListener('click', () => setPeriod(btn.dataset.period, 'primary'));
-  });
   // Modal period tabs
   document.querySelectorAll('.smp-tab').forEach(btn => {
     btn.addEventListener('click', () => setPeriod(btn.dataset.speriod, 'modal'));
@@ -1216,7 +1099,6 @@ function main() {
     for (let i = 0; i < 6; i++) { const t = ALERT_TMPL[Math.floor(rand(0, ALERT_TMPL.length))](); addAnomalyRow(t); }
     initDrag(); initSearch(); initPeriodTabs(); wireEvents();
     updateIndexWindow(); updateInstrumental(); updateSentUI(S.sent);
-    initInstrumentalTabs();
     initAINarrator();
     setInterval(tickOf, CFG.OF_TICK);
     setInterval(tickSent, CFG.SENT_TICK);
